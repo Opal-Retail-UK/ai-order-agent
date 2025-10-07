@@ -3,6 +3,7 @@ services:
     name: ai-order-agent
     env: python
     plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
-    postdeployCommand: "playwright install chromium"
+    buildCommand: |
+      pip install -r requirements.txt
+      playwright install chromium
+    startCommand: python main.py
