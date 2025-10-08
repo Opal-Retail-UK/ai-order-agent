@@ -59,7 +59,17 @@ def handle_order():
             # Aosom = more aggressive bot filter → run non-headless, add --no-sandbox
             headless = False if supplier == "aosom" else True
             args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-            browser = p.chromium.launch(headless=headless, args=args)
+            browser = p.chromium.launch(
+    headless=headless,
+    args=[
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--single-process",
+        "--disable-blink-features=AutomationControlled"
+    ]
+)
 
             context = browser.new_context(
                 user_agent=ua,
