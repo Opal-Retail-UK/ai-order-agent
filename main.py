@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
+import subprocess, os
 
 app = Flask(__name__)
 
@@ -11,21 +12,20 @@ def home():
 def handle_order():
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON body found"}), 400
-
         supplier = data.get("supplier", "unknown")
         sku = data.get("sku", "none")
 
-        # Launch Playwright safely
+        # --- Ensure Chromium is installed ---
+        chromium_path = "/opt/render/.cache/ms-playwright/chromium_headless_shell-1187/chrome-linux/headless_shell"
+        if not os.path.exists(chromium_path):
+            subprocess.run(["playwright", "install", "chromium"], check=False)
+
+        # --- Run Playwright test ---
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-
-            # Test: visit a lightweight site
             page.goto("https://example.com")
             title = page.title()
-
             browser.close()
 
         return jsonify({
@@ -37,7 +37,6 @@ def handle_order():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
