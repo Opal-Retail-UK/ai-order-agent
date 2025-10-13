@@ -105,7 +105,7 @@ def order():
 
             browser.close()
 
-                return jsonify({
+        return jsonify({
             "status": "success",
             "supplier": supplier,
             "brand": brand,
