@@ -105,13 +105,13 @@ def order():
 
             browser.close()
 
-        return jsonify({
+                return jsonify({
             "status": "success",
-            "brand": brand,
             "supplier": supplier,
+            "brand": brand,
             "sku": sku,
             "page_title": title,
-            "message": f"Opened {SUPPLIER_URL[supplier]}",
+            "message": f"Opened {SUPPLIER_URL[supplier]} successfully."
         }), 200
 
     except Exception as e:
