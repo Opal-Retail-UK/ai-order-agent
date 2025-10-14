@@ -2,8 +2,10 @@ services:
   - type: web
     name: ai-order-agent
     env: python
-    plan: free
     buildCommand: |
       pip install -r requirements.txt
       python -m playwright install chromium
     startCommand: python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
