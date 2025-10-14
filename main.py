@@ -1,108 +1,83 @@
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
-import subprocess, os, time, random
+import time
+import random
 
 app = Flask(__name__)
 
-# --- Brand → Supplier mapping (from your note) ---
-BRAND_TO_SUPPLIER = {
-    # Songmics group
+# Supplier URLs (brand mapping)
+SUPPLIER_URL = {
+    "songmics": "https://www.songmics.co.uk/",
+    "aosom": "https://www.aosom.co.uk/"
+}
+
+BRAND_SUPPLIER_MAP = {
     "vasagle": "songmics",
     "songmics": "songmics",
     "feandrea": "songmics",
-    # Aosom group
     "homcom": "aosom",
     "outsunny": "aosom",
     "pawhut": "aosom",
     "zonekiz": "aosom",
     "aiyaplay": "aosom",
     "kleankin": "aosom",
-    "vinsetto": "aosom",
+    "vinsetto": "aosom"
 }
 
-SUPPLIER_URL = {
-    "songmics": "https://www.songmics.co.uk/",
-    "aosom":    "https://www.aosom.co.uk/",
-}
 
-# Install Chromium if missing (don’t pin the path/version)
-def ensure_chromium():
-    try:
-        subprocess.run(
-            ["python", "-m", "playwright", "install", "chromium"],
-            check=False, capture_output=True
-        )
-    except Exception:
-        pass
-
-@app.route("/", methods=["GET"])
+@app.route('/')
 def home():
-    return "AI Order Agent – Render-optimised launcher ready."
+    return jsonify({"message": "AI Order Agent is running."}), 200
 
-@app.route("/order", methods=["POST"])
-def order():
+
+@app.route('/order', methods=['POST'])
+def handle_order():
     try:
-        payload = request.get_json(force=True, silent=True) or {}
-        brand = (payload.get("brand") or "").strip().lower()
-        sku   = (payload.get("sku") or "").strip()
+        data = request.get_json()
+        brand = data.get('brand', '').lower().strip()
+        sku = data.get('sku', '').strip()
 
-        supplier = BRAND_TO_SUPPLIER.get(brand)
+        if not brand or not sku:
+            return jsonify({"status": "error", "message": "Missing brand or SKU"}), 400
+
+        # Identify supplier from brand
+        supplier = BRAND_SUPPLIER_MAP.get(brand)
         if not supplier:
-            return jsonify({"status":"error",
-                            "message": f"Unknown brand '{brand}' — no supplier mapping."}), 400
+            return jsonify({"status": "error", "message": f"Unknown brand: {brand}"}), 400
 
-        # Make sure Chromium exists (first call after cold start may need this)
-        ensure_chromium()
-
-        # Lightweight launch args for Render free tier
-        chrome_args = [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-features=IsolateOrigins,site-per-process",
-            "--single-process",
-            "--disable-blink-features=AutomationControlled",
-        ]
-
-        # Subtle realism without going non-headless (keeps memory lower)
-        ua_pool = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36",
-        ]
-        ua = random.choice(ua_pool)
+        target = SUPPLIER_URL.get(supplier)
+        if not target:
+            return jsonify({"status": "error", "message": f"No URL configured for supplier: {supplier}"}), 400
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=chrome_args)
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
 
-            context = browser.new_context(
-                user_agent=ua,
-                viewport={"width": 1280, "height": 720},
-                extra_http_headers={
-                    "Accept-Language": "en-GB,en;q=0.9",
-                    "Referer": "https://www.google.com/",
-                    "DNT": "1",
-                },
-            )
-            page = context.new_page()
-            # Keep waits tight so we don’t hang on heavy assets
+            # Tight waits to avoid hanging too long
             page.set_default_timeout(12000)
-            page.set_default_navigation_timeout(18000)
+            page.set_default_navigation_timeout(45000)
 
-            # Tiny pause to look less botty
-            time.sleep(random.uniform(0.8, 1.6))
+            # Add a short, human-like delay before navigating
+            time.sleep(random.uniform(1.5, 3.5))
 
-            target = SUPPLIER_URL[supplier]
-            page.goto(target, wait_until="domcontentloaded", timeout=18000)
+            # Attempt navigation with retry logic
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    page.goto(target, wait_until="domcontentloaded", timeout=45000)
+                    title = page.title().strip()
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        print(f"Retrying ({attempt + 1}/{max_retries}) due to: {e}")
+                        time.sleep(random.uniform(2.5, 5.0))
+                    else:
+                        raise
 
-            # If a hard block page loads, title will expose it
+            # Mimic human reading time before exit
+            time.sleep(random.uniform(1.5, 3.0))
+
             title = page.title().strip()
-
             browser.close()
 
         return jsonify({
@@ -111,12 +86,13 @@ def order():
             "brand": brand,
             "sku": sku,
             "page_title": title,
-            "message": f"Opened {SUPPLIER_URL[supplier]} successfully."
+            "message": f"Opened {target} successfully."
         }), 200
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
 if __name__ == "__main__":
-    # Render binds port via PORT env; Flask default 5000 is fine for us
+    # Render binds PORT automatically; Flask defaults to 5000
     app.run(host="0.0.0.0", port=5000)
