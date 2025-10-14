@@ -1,138 +1,96 @@
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
-import subprocess
-import time
+import os
 import random
+import time
 
 app = Flask(__name__)
 
-# --------------------------------------------------------------------
-# SUPPLIER + BRAND MAPPING
-# --------------------------------------------------------------------
+# ---------------------------------------
+# CONFIG
+# ---------------------------------------
 SUPPLIER_URL = {
     "songmics": "https://www.songmics.co.uk/",
-    "aosom": "https://www.aosom.co.uk/"
 }
 
-BRAND_SUPPLIER_MAP = {
-    # Songmics group
-    "vasagle": "songmics",
-    "songmics": "songmics",
-    "feandrea": "songmics",
-    # Aosom group
-    "homcom": "aosom",
-    "outsunny": "aosom",
-    "pawhut": "aosom",
-    "zonekiz": "aosom",
-    "aiyaplay": "aosom",
-    "kleankin": "aosom",
-    "vinsetto": "aosom"
+LOGIN_URLS = {
+    "songmics": "https://www.songmics.co.uk/account/login",
 }
 
-# --------------------------------------------------------------------
-# ENSURE CHROMIUM INSTALLED (fixes "Executable doesn't exist" error)
-# --------------------------------------------------------------------
-def ensure_chromium():
-    try:
-        subprocess.run(
-            ["playwright", "install", "chromium"],
-            check=False,
-            capture_output=True
-        )
-        print("✅ Chromium check complete.")
-    except Exception as e:
-        print(f"⚠️ Chromium install failed: {e}")
+# Environment variables (set in Render dashboard)
+SONGMICS_EMAIL = os.getenv("SONGMICS_EMAIL")
+SONGMICS_PASSWORD = os.getenv("SONGMICS_PASSWORD")
 
-# --------------------------------------------------------------------
+# ---------------------------------------
 # ROUTES
-# --------------------------------------------------------------------
-@app.route("/")
+# ---------------------------------------
+@app.route("/", methods=["GET"])
 def home():
-    return jsonify({"message": "AI Order Agent is live and ready."}), 200
+    return jsonify({"message": "AI Order Agent running successfully 🚀"}), 200
 
 
 @app.route("/order", methods=["POST"])
-def handle_order():
+def place_order():
     try:
-        data = request.get_json(force=True, silent=True) or {}
-        brand = data.get("brand", "").lower().strip()
+        data = request.get_json()
+        brand = data.get("brand", "").lower()
         sku = data.get("sku", "").strip()
 
-        if not brand or not sku:
-            return jsonify({"status": "error", "message": "Missing brand or SKU"}), 400
-
-        supplier = BRAND_SUPPLIER_MAP.get(brand)
-        if not supplier:
+        # Determine supplier from brand
+        if brand in ["vasagle", "feandrea", "songmics"]:
+            supplier = "songmics"
+        else:
             return jsonify({"status": "error", "message": f"Unknown brand: {brand}"}), 400
 
-        target = SUPPLIER_URL.get(supplier)
-        if not target:
-            return jsonify({"status": "error", "message": f"No URL for supplier: {supplier}"}), 400
-
-        # ----------------------------------------------------------------
-        # ENSURE CHROMIUM EXISTS BEFORE LAUNCH
-        # ----------------------------------------------------------------
-        ensure_chromium()
-
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-extensions",
-                    "--single-process"
-                ]
-            )
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            context = browser.new_context()
+            page = context.new_page()
 
-            page = browser.new_page()
-            page.set_default_timeout(12000)
-            page.set_default_navigation_timeout(45000)
+            # Simulate human-like timing
+            time.sleep(random.uniform(1.0, 2.5))
 
-            # Simulate human behaviour
-            time.sleep(random.uniform(1.5, 3.5))
+            # Navigate to login page
+            login_url = LOGIN_URLS[supplier]
+            page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
 
-            # Attempt navigation with retry logic
-            max_retries = 2
-            title = ""
-            for attempt in range(max_retries):
-                try:
-                    print(f"Navigating to {target} (attempt {attempt + 1})")
-                    page.goto(target, wait_until="domcontentloaded", timeout=45000)
-                    title = page.title().strip()
-                    break
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        print(f"Retrying due to: {e}")
-                        time.sleep(random.uniform(3, 6))
-                    else:
-                        raise
+            # Fill login form
+            page.fill("input[name='customer[email]']", SONGMICS_EMAIL)
+            page.fill("input[name='customer[password]']", SONGMICS_PASSWORD)
 
-            # Short delay to mimic human browsing
-            time.sleep(random.uniform(1.5, 3.0))
+            # Submit login form
+            page.click("button[type='submit']")
+
+            # Wait for successful login
+            page.wait_for_selector("a[href*='/account']", timeout=10000)
+
+            # Verify login success
             title = page.title().strip()
+            print(f"✅ Logged in successfully. Page title: {title}")
+
+            # Go to home or test page (for now)
+            target = SUPPLIER_URL[supplier]
+            page.goto(target, wait_until="domcontentloaded")
+
+            time.sleep(random.uniform(1.5, 2.5))
+
             browser.close()
 
-        return jsonify({
-            "status": "success",
-            "supplier": supplier,
-            "brand": brand,
-            "sku": sku,
-            "page_title": title,
-            "message": f"Opened {target} successfully."
-        }), 200
+            return jsonify({
+                "status": "success",
+                "supplier": supplier,
+                "brand": brand,
+                "sku": sku,
+                "page_title": title,
+                "message": f"✅ Logged into {supplier} successfully."
+            }), 200
 
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# ---------------------------------------
+# ENTRY POINT
+# ---------------------------------------
 if __name__ == "__main__":
-    # Render automatically sets PORT
     app.run(host="0.0.0.0", port=5000)
