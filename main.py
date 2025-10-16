@@ -3,6 +3,11 @@ from playwright.sync_api import sync_playwright
 import os
 import random
 import time
+import subprocess
+try:
+    subprocess.run(["playwright", "install", "chromium"], check=True)
+except Exception as e:
+    print("Warning: Browser install skipped or failed:", e)
 
 app = Flask(__name__)
 
