@@ -60,15 +60,18 @@ def place_order():
 
         with sync_playwright() as p:
             # Headless = False for local debug (set True before deploying to Render)
-            browser = p.chromium.launch(
-                headless=False,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--single-process"
-                ]
-            )
+        import os
+
+        browser = p.chromium.launch(
+            headless=os.getenv("RENDER", "false").lower() == "true" or True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process"
+             ]
+        )
+
             context = browser.new_context()
             page = context.new_page()
 
