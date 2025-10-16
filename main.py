@@ -1,41 +1,37 @@
-import os
-import time
-import random
-import subprocess
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
-
-# Ensure Playwright browsers are installed (safety fallback)
-try:
-    subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
-except Exception as e:
-    print("Warning: Browser install skipped or failed:", e)
+import subprocess
+import time
+import random
 
 app = Flask(__name__)
 
+# --- Safety Fallback: Ensure Playwright browser is installed ---
+try:
+    subprocess.run(["playwright", "install", "chromium"], check=True)
+except Exception as e:
+    print("Warning: Playwright browser install skipped or failed:", e)
+
+# --- Supplier URLs ---
 SUPPLIER_URL = {
     "songmics": "https://www.songmics.co.uk/",
     "aosom": "https://www.aosom.co.uk/"
 }
 
-@app.route("/")
-def home():
-    return "AI Order Agent is running successfully 🚀", 200
-
-
+# --- Health Check Route ---
 @app.route("/health", methods=["GET"])
 def health():
     return "OK", 200
 
-
+# --- Main Order Endpoint ---
 @app.route("/order", methods=["POST"])
 def handle_order():
     try:
-        data = request.get_json(force=True)
-        brand = data.get("brand", "").strip().lower()
-        sku = data.get("sku", "").strip().upper()
+        data = request.get_json()
+        brand = data.get("brand", "").lower()
+        sku = data.get("sku", "").upper()
 
-        # Identify supplier based on brand
+        # --- Determine Supplier ---
         if brand in ["vasagle", "songmics", "feandrea"]:
             supplier = "songmics"
         elif brand in ["homcom", "outsunny", "pawhut", "zonekiz", "aiyaplay", "kleankin", "vinsetto"]:
@@ -46,42 +42,46 @@ def handle_order():
                 "message": f"Unknown brand: {brand}"
             }), 400
 
-        result = place_order(supplier, brand, sku)
-        return result
+        # --- Launch Playwright ---
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--single-process"
+                ]
+            )
+            context = browser.new_context()
+            page = context.new_page()
 
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+            # --- Timeout Settings ---
+            page.set_default_timeout(60000)
+            page.set_default_navigation_timeout(60000)
 
+            target = SUPPLIER_URL[supplier]
 
-def place_order(supplier, brand, sku):
-    with sync_playwright() as p:
-        # Force headless mode for Render, even if not specified
-        headless_mode = True
+            # --- Retry Navigation Logic (2 attempts) ---
+            for attempt in range(2):
+                try:
+                    page.goto(target, wait_until="load", timeout=60000)
+                    page.wait_for_selector("body", timeout=10000)
+                    title = page.title().strip()
+                    break
+                except Exception as inner_error:
+                    if attempt == 0:
+                        print(f"[Retry {attempt+1}] Error navigating to {target}: {inner_error}")
+                        time.sleep(5)
+                    else:
+                        raise inner_error
 
-        browser = p.chromium.launch(
-            headless=headless_mode,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--single-process"
-            ]
-        )
+            # --- Add human-like delay to mimic browsing ---
+            time.sleep(random.uniform(1.5, 3.5))
 
-        page = browser.new_page()
+            browser.close()
 
-        # Add natural delay before navigation (looks more human)
-        time.sleep(random.uniform(1.0, 2.5))
-
-        target = SUPPLIER_URL[supplier]
-        page.goto(target, wait_until="domcontentloaded", timeout=30000)
-
-        # Let page load properly
-        time.sleep(random.uniform(1.0, 2.0))
-        title = page.title().strip()
-
-        browser.close()
-
+        # --- Response ---
         return jsonify({
             "status": "success",
             "supplier": supplier,
@@ -91,8 +91,10 @@ def place_order(supplier, brand, sku):
             "message": f"Opened {target} successfully."
         }), 200
 
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
+
+# --- Flask Entrypoint ---
 if __name__ == "__main__":
-    # Render binds port dynamically, so we use PORT if available
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
